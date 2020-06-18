@@ -1021,6 +1021,8 @@ EptHandleHookedPage(PGUEST_REGS Regs, EPT_HOOKED_PAGE_DETAIL * HookedEntryDetail
 BOOLEAN
 EptPerformPageHook(PVOID TargetAddress, PVOID HookFunction, UINT32 ProcessId, BOOLEAN UnsetRead, BOOLEAN UnsetWrite, BOOLEAN UnsetExecute)
 {
+    DbgBreakPoint();
+
     EPT_PML1_ENTRY          ChangedEntry;
     INVEPT_DESCRIPTOR       Descriptor;
     SIZE_T                  PhysicalAddress;

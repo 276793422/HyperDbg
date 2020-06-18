@@ -1085,13 +1085,16 @@ DebuggerRemoveEvent(UINT64 Tag)
 BOOLEAN
 DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT32 BufferLength, PDEBUGGER_EVENT_AND_ACTION_REG_BUFFER ResultsToReturnUsermode)
 {
+    DbgBreakPoint();
+
     PDEBUGGER_EVENT Event;
     UINT64          PagesBytes;
+    UINT32          TempPid;
     UINT32          ProcessorCount = KeQueryActiveProcessorCount(0);
 
     //
     // ----------------------------------------------------------------------------------
-    // Validate the Event's  parameters
+    // Validate the Event's parameters
     // ----------------------------------------------------------------------------------
     //
 
@@ -1155,7 +1158,13 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
         //
         // First check if the address are valid
         //
-        if (VirtualAddressToPhysicalAddress(EventDetails->OptionalParam1) == NULL)
+        TempPid = EventDetails->ProcessId;
+        if (TempPid == DEBUGGER_EVENT_APPLY_TO_ALL_PROCESSES)
+        {
+            TempPid = PsGetCurrentProcessId();
+        }
+        DbgBreakPoint();
+        if (VirtualAddressToPhysicalAddressByProcessId(EventDetails->OptionalParam1, TempPid) == NULL)
         {
             //
             // Address is invalid (Set the error)
