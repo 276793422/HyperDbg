@@ -12,9 +12,61 @@
 
 #include "Vmcall.h"
 #include "GlobalVariables.h"
+#include "HypervisorRoutines.h"
 #include "Hooks.h"
 #include "Common.h"
 #include "Invept.h"
+#include "InlineAsm.h"
+#include "Vpid.h"
+
+/**
+ * @brief Handle vm-exits of VMCALLs
+ * 
+ * @param GuestRegs Guest Registers
+ * @return NTSTATUS 
+ */
+NTSTATUS
+VmxHandleVmcallVmExit(PGUEST_REGS GuestRegs)
+{
+    //
+    // Check if it's our routines that request the VMCALL our it relates to Hyper-V
+    //
+    if (GuestRegs->r10 == 0x48564653 && GuestRegs->r11 == 0x564d43414c4c && GuestRegs->r12 == 0x4e4f485950455256)
+    {
+        //
+        // Then we have to manage it as it relates to us
+        //
+        GuestRegs->rax = VmxVmcallHandler(GuestRegs->rcx, GuestRegs->rdx, GuestRegs->r8, GuestRegs->r9);
+    }
+    else
+    {
+        HYPERCALL_INPUT_VALUE InputValue = {0};
+        InputValue.Value                 = GuestRegs->rcx;
+
+        switch (InputValue.Bitmap.CallCode)
+        {
+        case HvSwitchVirtualAddressSpace:
+        case HvFlushVirtualAddressSpace:
+        case HvFlushVirtualAddressList:
+        case HvCallFlushVirtualAddressSpaceEx:
+        case HvCallFlushVirtualAddressListEx:
+        {
+            InvvpidAllContexts();
+            break;
+        }
+        case HvCallFlushGuestPhysicalAddressSpace:
+        case HvCallFlushGuestPhysicalAddressList:
+        {
+            InveptSingleContext(g_EptState->EptPointer.Flags);
+            break;
+        }
+        }
+        //
+        // Let the top-level hypervisor to manage it
+        //
+        GuestRegs->rax = AsmHypervVmcall(GuestRegs->rcx, GuestRegs->rdx, GuestRegs->r8, GuestRegs->r9);
+    }
+}
 
 /**
  * @brief Main Vmcall Handler
@@ -70,6 +122,7 @@ VmxVmcallHandler(UINT64 VmcallNumber,
 
         HookResult = EptPerformPageHook(OptionalParam1 /* TargetAddress */,
                                         OptionalParam2 /* Hook Function*/,
+                                        OptionalParam3,
                                         UnsetRead,
                                         UnsetWrite,
                                         UnsetExec);
@@ -112,6 +165,54 @@ VmxVmcallHandler(UINT64 VmcallNumber,
     case VMCALL_DISABLE_SYSCALL_HOOK_EFER:
     {
         SyscallHookConfigureEFER(FALSE);
+        break;
+    }
+    case VMCALL_CHANGE_MSR_BITMAP_READ:
+    {
+        HvPerformMsrBitmapReadChange(OptionalParam1);
+        VmcallStatus = STATUS_SUCCESS;
+        break;
+    }
+    case VMCALL_CHANGE_MSR_BITMAP_WRITE:
+    {
+        HvPerformMsrBitmapWriteChange(OptionalParam1);
+        VmcallStatus = STATUS_SUCCESS;
+        break;
+    }
+    case VMCALL_SET_RDTSC_EXITING:
+    {
+        HvSetTscVmexit(TRUE);
+        VmcallStatus = STATUS_SUCCESS;
+        break;
+    }
+    case VMCALL_SET_RDPMC_EXITING:
+    {
+        HvSetPmcVmexit(TRUE);
+        VmcallStatus = STATUS_SUCCESS;
+        break;
+    }
+    case VMCALL_SET_EXCEPTION_BITMAP:
+    {
+        HvSetExceptionBitmap(OptionalParam1);
+        VmcallStatus = STATUS_SUCCESS;
+        break;
+    }
+    case VMCALL_ENABLE_MOV_TO_DEBUG_REGS_EXITING:
+    {
+        HvSetMovDebugRegsExiting(TRUE);
+        VmcallStatus = STATUS_SUCCESS;
+        break;
+    }
+    case VMCALL_ENABLE_EXTERNAL_INTERRUPT_EXITING:
+    {
+        HvSetExternalInterruptExiting(TRUE);
+        VmcallStatus = STATUS_SUCCESS;
+        break;
+    }
+    case VMCALL_CHANGE_IO_BITMAP:
+    {
+        HvPerformIoBitmapChange(OptionalParam1);
+        VmcallStatus = STATUS_SUCCESS;
         break;
     }
     default:

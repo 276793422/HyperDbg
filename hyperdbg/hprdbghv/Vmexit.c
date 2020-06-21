@@ -23,6 +23,9 @@
 #include "Invept.h"
 #include "HypervisorRoutines.h"
 #include "Events.h"
+#include "IoHandler.h"
+#include "Counters.h"
+#include "IdtEmulation.h"
 
 /**
  * @brief VM-Exit handler for different exit reasons
@@ -31,17 +34,19 @@
  * @return BOOLEAN Return True if VMXOFF executed (not in vmx anymore),
  *  or return false if we are still in vmx (so we should use vm resume)
  */
+
 BOOLEAN
 VmxVmexitHandler(PGUEST_REGS GuestRegs)
 {
     VMEXIT_INTERRUPT_INFO InterruptExit         = {0};
+    IO_EXIT_QUALIFICATION IoQualification       = {0};
+    RFLAGS                Flags                 = {0};
     UINT64                GuestPhysicalAddr     = 0;
     UINT64                GuestRsp              = 0;
     ULONG                 ExitReason            = 0;
     ULONG                 ExitQualification     = 0;
     ULONG                 Rflags                = 0;
     ULONG                 EcxReg                = 0;
-    ULONG                 ErrorCode             = 0;
     ULONG                 ExitInstructionLength = 0;
     ULONG                 CurrentProcessorIndex = 0;
 
@@ -103,16 +108,31 @@ VmxVmexitHandler(PGUEST_REGS GuestRegs)
     case EXIT_REASON_VMXON:
     case EXIT_REASON_VMLAUNCH:
     {
-        __vmx_vmread(GUEST_RFLAGS, &Rflags);
-
         //
         // cf=1 indicate vm instructions fail
         //
-        __vmx_vmwrite(GUEST_RFLAGS, Rflags | 0x1);
+        //__vmx_vmread(GUEST_RFLAGS, &Rflags);
+        //__vmx_vmwrite(GUEST_RFLAGS, Rflags | 0x1);
+
+        //
+        // Handle unconditional vm-exits (inject #ud)
+        //
+        EventInjectUndefinedOpcode(CurrentProcessorIndex);
 
         break;
     }
+    case EXIT_REASON_INVEPT:
+    case EXIT_REASON_INVVPID:
+    case EXIT_REASON_GETSEC:
+    case EXIT_REASON_INVD:
+    {
+        //
+        // Handle unconditional vm-exits (inject #ud)
+        //
+        EventInjectUndefinedOpcode(CurrentProcessorIndex);
 
+        break;
+    }
     case EXIT_REASON_CR_ACCESS:
     {
         HvHandleControlRegisterAccess(GuestRegs);
@@ -120,17 +140,27 @@ VmxVmexitHandler(PGUEST_REGS GuestRegs)
     }
     case EXIT_REASON_MSR_READ:
     {
-        DbgBreakPoint();
         EcxReg = GuestRegs->rcx & 0xffffffff;
         HvHandleMsrRead(GuestRegs);
+
+        //
+        // As the context to event trigger, we send the ecx
+        // which is the MSR index
+        //
+        DebuggerTriggerEvents(RDMSR_INSTRUCTION_EXECUTION, GuestRegs, EcxReg);
 
         break;
     }
     case EXIT_REASON_MSR_WRITE:
     {
-        DbgBreakPoint();
         EcxReg = GuestRegs->rcx & 0xffffffff;
         HvHandleMsrWrite(GuestRegs);
+
+        //
+        // As the context to event trigger, we send the ecx
+        // which is the MSR index
+        //
+        DebuggerTriggerEvents(WRMSR_INSTRUCTION_EXECUTION, GuestRegs, EcxReg);
 
         break;
     }
@@ -142,7 +172,33 @@ VmxVmexitHandler(PGUEST_REGS GuestRegs)
 
     case EXIT_REASON_IO_INSTRUCTION:
     {
-        LogError("Exit reason for I/O instructions are not supported yet.");
+        //
+        // Read the I/O Qualification which indicates the I/O instruction
+        //
+        __vmx_vmread(EXIT_QUALIFICATION, &IoQualification);
+
+        //
+        // Read Guest's RFLAGS
+        //
+        __vmx_vmread(GUEST_RFLAGS, &Flags);
+
+        //
+        // Call the I/O Handler
+        //
+        IoHandleIoVmExits(GuestRegs, IoQualification, Flags);
+
+        //
+        // As the context to event trigger, port address
+        //
+        if (IoQualification.AccessType == AccessIn)
+        {
+            DebuggerTriggerEvents(IN_INSTRUCTION_EXECUTION, GuestRegs, IoQualification.PortNumber);
+        }
+        else if (IoQualification.AccessType == AccessOut)
+        {
+            DebuggerTriggerEvents(OUT_INSTRUCTION_EXECUTION, GuestRegs, IoQualification.PortNumber);
+        }
+
         break;
     }
     case EXIT_REASON_EPT_VIOLATION:
@@ -170,145 +226,67 @@ VmxVmexitHandler(PGUEST_REGS GuestRegs)
     case EXIT_REASON_VMCALL:
     {
         //
-        // Check if it's our routines that request the VMCALL our it relates to Hyper-V
+        // Handle vm-exits of VMCALLs
         //
-        if (GuestRegs->r10 == 0x48564653 && GuestRegs->r11 == 0x564d43414c4c && GuestRegs->r12 == 0x4e4f485950455256)
-        {
-            //
-            // Then we have to manage it as it relates to us
-            //
-            GuestRegs->rax = VmxVmcallHandler(GuestRegs->rcx, GuestRegs->rdx, GuestRegs->r8, GuestRegs->r9);
-        }
-        else
-        {
-            HYPERCALL_INPUT_VALUE InputValue = {0};
-            InputValue.Value                 = GuestRegs->rcx;
+        VmxHandleVmcallVmExit(GuestRegs);
 
-            switch (InputValue.Bitmap.CallCode)
-            {
-            case HvSwitchVirtualAddressSpace:
-            case HvFlushVirtualAddressSpace:
-            case HvFlushVirtualAddressList:
-            case HvCallFlushVirtualAddressSpaceEx:
-            case HvCallFlushVirtualAddressListEx:
-            {
-                InvvpidAllContexts();
-                break;
-            }
-            case HvCallFlushGuestPhysicalAddressSpace:
-            case HvCallFlushGuestPhysicalAddressList:
-            {
-                InveptSingleContext(g_EptState->EptPointer.Flags);
-                break;
-            }
-            }
-            //
-            // Let the top-level hypervisor to manage it
-            //
-            GuestRegs->rax = AsmHypervVmcall(GuestRegs->rcx, GuestRegs->rdx, GuestRegs->r8, GuestRegs->r9);
-        }
         break;
     }
     case EXIT_REASON_EXCEPTION_NMI:
     {
         //
-        // Exception or non-maskable interrupt (NMI). Either:
-        //	1: Guest software caused an exception and the bit in the exception bitmap associated with exception�s vector was set to 1
-        //	2: An NMI was delivered to the logical processor and the �NMI exiting� VM-execution control was 1.
-        //
-        // VM_EXIT_INTR_INFO shows the exit infromation about event that occured and causes this exit
-        // Don't forget to read VM_EXIT_INTR_ERROR_CODE in the case of re-injectiong event
-        //
-
-        //
         // read the exit reason
         //
         __vmx_vmread(VM_EXIT_INTR_INFO, &InterruptExit);
 
-        if (InterruptExit.InterruptionType == INTERRUPT_TYPE_SOFTWARE_EXCEPTION && InterruptExit.Vector == EXCEPTION_VECTOR_BREAKPOINT)
-        {
-            ULONG64 GuestRip;
-            //
-            // Reading guest's RIP
-            //
-            __vmx_vmread(GUEST_RIP, &GuestRip);
+        //
+        // Call the Exception Bitmap and NMI Handler
+        //
+        IdtEmulationHandleExceptionAndNmi(InterruptExit, CurrentProcessorIndex, GuestRegs);
 
-            //
-            // Send the user
-            //
-            LogInfo("Breakpoint Hit (Process Id : 0x%x) at : %llx ", PsGetCurrentProcessId(), GuestRip);
+        //
+        // Trigger the event
+        //
+        // As the context to event trigger, we send the vector
+        // or IDT Index
+        //
+        DebuggerTriggerEvents(EXCEPTION_OCCURRED, GuestRegs, InterruptExit.Vector);
 
-            g_GuestState[CurrentProcessorIndex].IncrementRip = FALSE;
+        break;
+    }
+    case EXIT_REASON_EXTERNAL_INTERRUPT:
+    {
+        //
+        // read the exit reason (for interrupt)
+        //
+        __vmx_vmread(VM_EXIT_INTR_INFO, &InterruptExit);
 
-            //
-            // re-inject #BP back to the guest
-            //
-            EventInjectBreakpoint();
-        }
-        else if (InterruptExit.InterruptionType == INTERRUPT_TYPE_HARDWARE_EXCEPTION && InterruptExit.Vector == EXCEPTION_VECTOR_UNDEFINED_OPCODE)
-        {
-            //
-            // Handle the #UD, checking if this exception was intentional.
-            //
-            if (!SyscallHookHandleUD(GuestRegs, CurrentProcessorIndex))
-            {
-                //
-                // If this #UD was found to be unintentional, inject a #UD interruption into the guest.
-                //
-                EventInjectUndefinedOpcode();
-            }
-        }
-        else
-        {
-            if (InterruptExit.Vector == EXCEPTION_VECTOR_PAGE_FAULT)
-            {
-                //
-                // #PF is treated differently, we have to deal with cr2 too.
-                //
-                PAGE_FAULT_ERROR_CODE PageFaultCode = {0};
+        //
+        // Call External Interrupt Handler
+        //
+        IdtEmulationHandleExternalInterrupt(InterruptExit, CurrentProcessorIndex);
 
-                __vmx_vmread(VM_EXIT_INTR_ERROR_CODE, &PageFaultCode);
+        //
+        // Trigger the event
+        //
+        // As the context to event trigger, we send the vector index
+        //
+        // Keep in mind that interrupt might be inseted in pending list
+        // because the guest is not in a interruptible state and will
+        // be re-injected when the guest is ready for interrupts
+        //
+        DebuggerTriggerEvents(EXTERNAL_INTERRUPT_OCCURRED, GuestRegs, InterruptExit.Vector);
 
-                UINT64 PageFaultAddress = 0;
+        break;
+    }
+    case EXIT_REASON_PENDING_VIRT_INTR:
+    {
+        //
+        // Call the interrupt-window exiting handler to re-inject the previous
+        // interrupts or disable the interrupt-window exiting bit
+        //
+        IdtEmulationHandleInterruptWindowExiting(CurrentProcessorIndex);
 
-                __vmx_vmread(EXIT_QUALIFICATION, &PageFaultAddress);
-
-                // EventInjectPageFault(PageFaultCode.All);
-
-                LogInfo("#PF Fault = %016llx, Page Fault Code = 0x%x", PageFaultAddress, PageFaultCode.All);
-
-                //
-                // Cr2 is used as the page-fault address
-                //
-                __writecr2(PageFaultAddress);
-
-                g_GuestState[CurrentProcessorIndex].IncrementRip = FALSE;
-            }
-            LogInfo("Interrupt vector : 0x%x", InterruptExit.Vector);
-            //
-            // Re-inject the interrupt/exception
-            //
-            __vmx_vmwrite(VM_ENTRY_INTR_INFO, InterruptExit.Flags);
-
-            //
-            // re-write error code (if any)
-            //
-            if (InterruptExit.ErrorCodeValid)
-            {
-                //
-                // Read the error code
-                //
-                __vmx_vmread(VM_EXIT_INTR_ERROR_CODE, &ErrorCode);
-
-                //
-                // Write the error code
-                //
-                __vmx_vmwrite(VM_ENTRY_EXCEPTION_ERROR_CODE, ErrorCode);
-            }
-            //
-            //LogError("Not expected event occured");
-            //
-        }
         break;
     }
     case EXIT_REASON_MONITOR_TRAP_FLAG:
@@ -347,6 +325,10 @@ VmxVmexitHandler(PGUEST_REGS GuestRegs)
     case EXIT_REASON_HLT:
     {
         //
+        // We don't wanna halt
+        //
+
+        //
         //__halt();
         //
         break;
@@ -354,22 +336,71 @@ VmxVmexitHandler(PGUEST_REGS GuestRegs)
     case EXIT_REASON_RDTSC:
     {
         //
-        // I realized that if you log anything here (LogInfo) then
-        // the system-halts, currently don't have any idea of how
-        // to solve it, in the future we solve it using tsc offsectiong
-        // or tsc scalling
+        // handle rdtsc (emulate rdtsc)
         //
-        ULONG64 Tsc    = __rdtsc();
-        GuestRegs->rax = 0x00000000ffffffff & Tsc;
-        GuestRegs->rdx = 0x00000000ffffffff & (Tsc >> 32);
+        CounterEmulateRdtsc(GuestRegs);
+
+        //
+        // As the context to event trigger, we send the false which means
+        // it's an rdtsc (for rdtscp we set Context to true)
+        //
+        DebuggerTriggerEvents(TSC_INSTRUCTION_EXECUTION, GuestRegs, FALSE);
+
         break;
     }
     case EXIT_REASON_RDTSCP:
     {
-        int     Aux    = 0;
-        ULONG64 Tsc    = __rdtscp(&Aux);
-        GuestRegs->rax = 0x00000000ffffffff & Tsc;
-        GuestRegs->rdx = 0x00000000ffffffff & (Tsc >> 32);
+        //
+        // handle rdtscp (emulate rdtscp)
+        //
+        CounterEmulateRdtscp(GuestRegs);
+
+        //
+        // As the context to event trigger, we send the false which means
+        // it's an rdtsc (for rdtscp we set Context to true)
+        //
+        DebuggerTriggerEvents(TSC_INSTRUCTION_EXECUTION, GuestRegs, TRUE);
+
+        break;
+    }
+    case EXIT_REASON_RDPMC:
+    {
+        //
+        // handle rdpmc (emulate rdpmc)
+        //
+        CounterEmulateRdpmc(GuestRegs);
+
+        //
+        // As the context to event trigger, we send the NULL
+        //
+        DebuggerTriggerEvents(PMC_INSTRUCTION_EXECUTION, GuestRegs, NULL);
+
+        break;
+    }
+    case EXIT_REASON_DR_ACCESS:
+    {
+        //
+        // Handle access to debug registers
+        //
+        HvHandleMovDebugRegister(CurrentProcessorIndex, GuestRegs);
+
+        //
+        // Trigger the event
+        //
+        // As the context to event trigger, we send NULL
+        //
+        DebuggerTriggerEvents(DEBUG_REGISTERS_ACCESSED, GuestRegs, NULL);
+
+        break;
+    }
+    case EXIT_REASON_XSETBV:
+    {
+        //
+        // Handle xsetbv (unconditional vm-exit)
+        //
+        EcxReg = GuestRegs->rcx & 0xffffffff;
+        VmxHandleXsetbv(EcxReg, GuestRegs->rdx << 32 | GuestRegs->rax);
+
         break;
     }
     default:
@@ -379,6 +410,10 @@ VmxVmexitHandler(PGUEST_REGS GuestRegs)
     }
     }
 
+    //
+    // Check whether we need to increment the guest's ip or not
+    // Also, we should not increment rip if a vmxoff executed
+    //
     if (!g_GuestState[CurrentProcessorIndex].VmxoffState.IsVmxoffExecuted && g_GuestState[CurrentProcessorIndex].IncrementRip)
     {
         HvResumeToNextInstruction();

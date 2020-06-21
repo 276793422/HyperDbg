@@ -10,12 +10,16 @@
  * @copyright This project is released under the GNU Public License v3.
  * 
  */
+
 #include <ntddk.h>
 #include "Common.h"
 #include "Debugger.h"
 #include "DebuggerEvents.h"
 #include "GlobalVariables.h"
 #include "Hooks.h"
+#include "ExtensionCommands.h"
+#include "HypervisorRoutines.h"
+#include "DpcRoutines.h"
 #include "InlineAsm.h"
 
 BOOLEAN
@@ -53,9 +57,13 @@ DebuggerInitialize()
     InitializeListHead(&g_Events->CpuidInstructionExecutionEventsHead);
     InitializeListHead(&g_Events->RdmsrInstructionExecutionEventsHead);
     InitializeListHead(&g_Events->WrmsrInstructionExecutionEventsHead);
+    InitializeListHead(&g_Events->ExceptionOccurredEventsHead);
+    InitializeListHead(&g_Events->TscInstructionExecutionEventsHead);
+    InitializeListHead(&g_Events->PmcInstructionExecutionEventsHead);
     InitializeListHead(&g_Events->InInstructionExecutionEventsHead);
     InitializeListHead(&g_Events->OutInstructionExecutionEventsHead);
-    InitializeListHead(&g_Events->ExceptionOccurredEventsHead);
+    InitializeListHead(&g_Events->DebugRegistersAccessedEventsHead);
+    InitializeListHead(&g_Events->ExternalInterruptOccurredEventsHead);
 
     //
     // Initialize the list of hidden hooks headers
@@ -340,14 +348,26 @@ DebuggerRegisterEvent(PDEBUGGER_EVENT Event)
     case WRMSR_INSTRUCTION_EXECUTION:
         InsertHeadList(&g_Events->WrmsrInstructionExecutionEventsHead, &(Event->EventsOfSameTypeList));
         break;
+    case EXCEPTION_OCCURRED:
+        InsertHeadList(&g_Events->ExceptionOccurredEventsHead, &(Event->EventsOfSameTypeList));
+        break;
+    case TSC_INSTRUCTION_EXECUTION:
+        InsertHeadList(&g_Events->TscInstructionExecutionEventsHead, &(Event->EventsOfSameTypeList));
+        break;
+    case PMC_INSTRUCTION_EXECUTION:
+        InsertHeadList(&g_Events->PmcInstructionExecutionEventsHead, &(Event->EventsOfSameTypeList));
+        break;
     case IN_INSTRUCTION_EXECUTION:
         InsertHeadList(&g_Events->InInstructionExecutionEventsHead, &(Event->EventsOfSameTypeList));
         break;
     case OUT_INSTRUCTION_EXECUTION:
         InsertHeadList(&g_Events->OutInstructionExecutionEventsHead, &(Event->EventsOfSameTypeList));
         break;
-    case EXCEPTION_OCCURRED:
-        InsertHeadList(&g_Events->ExceptionOccurredEventsHead, &(Event->EventsOfSameTypeList));
+    case DEBUG_REGISTERS_ACCESSED:
+        InsertHeadList(&g_Events->DebugRegistersAccessedEventsHead, &(Event->EventsOfSameTypeList));
+        break;
+    case EXTERNAL_INTERRUPT_OCCURRED:
+        InsertHeadList(&g_Events->ExternalInterruptOccurredEventsHead, &(Event->EventsOfSameTypeList));
         break;
     default:
         //
@@ -447,6 +467,24 @@ DebuggerTriggerEvents(DEBUGGER_EVENT_TYPE_ENUM EventType, PGUEST_REGS Regs, PVOI
         TempList2 = TempList;
         break;
     }
+    case EXCEPTION_OCCURRED:
+    {
+        TempList  = &g_Events->ExceptionOccurredEventsHead;
+        TempList2 = TempList;
+        break;
+    }
+    case TSC_INSTRUCTION_EXECUTION:
+    {
+        TempList  = &g_Events->TscInstructionExecutionEventsHead;
+        TempList2 = TempList;
+        break;
+    }
+    case PMC_INSTRUCTION_EXECUTION:
+    {
+        TempList  = &g_Events->PmcInstructionExecutionEventsHead;
+        TempList2 = TempList;
+        break;
+    }
     case IN_INSTRUCTION_EXECUTION:
     {
         TempList  = &g_Events->InInstructionExecutionEventsHead;
@@ -459,9 +497,15 @@ DebuggerTriggerEvents(DEBUGGER_EVENT_TYPE_ENUM EventType, PGUEST_REGS Regs, PVOI
         TempList2 = TempList;
         break;
     }
-    case EXCEPTION_OCCURRED:
+    case DEBUG_REGISTERS_ACCESSED:
     {
-        TempList  = &g_Events->ExceptionOccurredEventsHead;
+        TempList  = &g_Events->DebugRegistersAccessedEventsHead;
+        TempList2 = TempList;
+        break;
+    }
+    case EXTERNAL_INTERRUPT_OCCURRED:
+    {
+        TempList  = &g_Events->ExternalInterruptOccurredEventsHead;
         TempList2 = TempList;
         break;
     }
@@ -509,12 +553,34 @@ DebuggerTriggerEvents(DEBUGGER_EVENT_TYPE_ENUM EventType, PGUEST_REGS Regs, PVOI
         }
 
         //
-        // For hidden hook read/writes we check whether the address
-        // is in the range of what user specified or not, this is because
-        // we get the events for all hidden hooks in a page granularity
+        // Check event type specific conditions
         //
-        if (CurrentEvent->EventType == HIDDEN_HOOK_READ_AND_WRITE || CurrentEvent->EventType == HIDDEN_HOOK_READ || CurrentEvent->EventType == HIDDEN_HOOK_WRITE)
+        switch (CurrentEvent->EventType)
         {
+        case EXTERNAL_INTERRUPT_OCCURRED:
+            //
+            // For external interrupt exiting events we check whether the
+            // vector match the event's vector or not
+            //
+            // Context is the physical address
+            //
+            if (Context != CurrentEvent->OptionalParam1)
+            {
+                //
+                // The interrupt is not for this event
+                //
+                continue;
+            }
+            break;
+        case HIDDEN_HOOK_READ_AND_WRITE:
+        case HIDDEN_HOOK_READ:
+        case HIDDEN_HOOK_WRITE:
+            //
+            // For hidden hook read/writes we check whether the address
+            // is in the range of what user specified or not, this is because
+            // we get the events for all hidden hooks in a page granularity
+            //
+
             //
             // Context is the physical address
             //
@@ -525,32 +591,91 @@ DebuggerTriggerEvents(DEBUGGER_EVENT_TYPE_ENUM EventType, PGUEST_REGS Regs, PVOI
                 //
                 continue;
             }
-        }
-
-        //
-        // Here we check if it's HIDDEN_HOOK_EXEC_DETOURS then it means
-        // that it's detours hidden hook exec so we have to make sure
-        // to perform its actions, only if the hook is triggered for
-        // the address described in event, note that address in event
-        // is a physical address and the address that the function that
-        // triggers these events and sent here as the context is also
-        // converted to its physical form
-        //
-        // This way we are sure that no one can bypass our hook by remapping
-        // address to another virtual address as everything is physical
-        //
-        if (CurrentEvent->EventType == HIDDEN_HOOK_EXEC_DETOURS)
-        {
+            break;
+        case HIDDEN_HOOK_EXEC_DETOURS:
             //
-            // Context is the physical address
+            // Here we check if it's HIDDEN_HOOK_EXEC_DETOURS then it means
+            // that it's detours hidden hook exec so we have to make sure
+            // to perform its actions, only if the hook is triggered for
+            // the address described in event, note that address in event
+            // is a physical address and the address that the function that
+            // triggers these events and sent here as the context is also
+            // converted to its physical form
+            //
+            // This way we are sure that no one can bypass our hook by remapping
+            // address to another virtual address as everything is physical
             //
             if (Context != CurrentEvent->OptionalParam1)
             {
+                //
+                // Context is the physical address
+                //
+
                 //
                 // The hook is not for this (physical) address
                 //
                 continue;
             }
+            break;
+        case RDMSR_INSTRUCTION_EXECUTION:
+        case WRMSR_INSTRUCTION_EXECUTION:
+            //
+            // check if MSR exit is what we want or not
+            //
+            if (CurrentEvent->OptionalParam1 != DEBUGGER_EVENT_MSR_READ_OR_WRITE_ALL_MSRS && CurrentEvent->OptionalParam1 != Context)
+            {
+                //
+                // The msr is not what we want
+                //
+                continue;
+            }
+            break;
+        case EXCEPTION_OCCURRED:
+            //
+            // check if exception is what we need or not
+            //
+            if (CurrentEvent->OptionalParam1 != DEBUGGER_EVENT_EXCEPTIONS_ALL_FIRST_32_ENTRIES && CurrentEvent->OptionalParam1 != Context)
+            {
+                //
+                // The exception is not what we want
+                //
+                continue;
+            }
+            break;
+        case IN_INSTRUCTION_EXECUTION:
+        case OUT_INSTRUCTION_EXECUTION:
+            //
+            // check if I/O port is what we want or not
+            //
+            if (CurrentEvent->OptionalParam1 != DEBUGGER_EVENT_ALL_IO_PORTS && CurrentEvent->OptionalParam1 != Context)
+            {
+                //
+                // The port is not what we want
+                //
+                continue;
+            }
+            break;
+        case SYSCALL_HOOK_EFER_SYSCALL:
+
+            //
+            // case SYSCALL_HOOK_EFER_SYSRET:
+            //
+            // I don't know how to find syscall number when sysret is executed so
+            // that's why we don't support extra argument for sysret
+
+            //
+            // check syscall number
+            //
+            if (CurrentEvent->OptionalParam1 != DEBUGGER_EVENT_SYSCALL_ALL_SYSRET_OR_SYSCALLS && CurrentEvent->OptionalParam1 != Context)
+            {
+                //
+                // The syscall number is not what we want
+                //
+                continue;
+            }
+            break;
+        default:
+            break;
         }
 
         //
@@ -664,8 +789,9 @@ DebuggerPerformRunTheCustomCode(UINT64 Tag, PDEBUGGER_EVENT_ACTION Action, PGUES
     // -----------------------------------------------------------------------------------------------------
     // Test (Should be removed)
     //
-    //LogInfo("%x       Called from : %llx", Tag, Context);
-    LogInfo("Rax : %llx , Rbx : %llx", Regs->rax, Regs->rbx);
+    // LogInfo("%x       Called from : %llx", Tag, Context);
+    //
+    LogInfo("Process Id : %x , Rax : %llx , Rbx : %llx , Context : 0x%llx ", PsGetCurrentProcessId(), Regs->rax, Regs->rbx, Context);
     return;
     //
     // -----------------------------------------------------------------------------------------------------
@@ -963,16 +1089,82 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
 
     PDEBUGGER_EVENT Event;
     UINT64          PagesBytes;
+    UINT32          TempPid;
+    UINT32          ProcessorCount = KeQueryActiveProcessorCount(0);
 
     //
-    // Validate the parameters
+    // ----------------------------------------------------------------------------------
+    // Validate the Event's parameters
+    // ----------------------------------------------------------------------------------
     //
-    if (EventDetails->EventType == HIDDEN_HOOK_EXEC_DETOURS)
+
+    //
+    // Check whether the core Id is valid or not, we read cores count
+    // here because we use it in later parts
+    //
+    if (EventDetails->CoreId != DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+    {
+        //
+        // Check if the core number is not invalid
+        //
+        if (EventDetails->CoreId >= ProcessorCount)
+        {
+            //
+            // CoreId is invalid (Set the error)
+            //
+
+            ResultsToReturnUsermode->IsSuccessful = FALSE;
+            ResultsToReturnUsermode->Error        = DEBUGEER_ERROR_INVALID_CORE_ID;
+            return FALSE;
+        }
+    }
+
+    if (EventDetails->EventType == EXCEPTION_OCCURRED)
+    {
+        //
+        // Check if the exception entry doesn't exceed the first 32 entry
+        //
+        if (EventDetails->OptionalParam1 != DEBUGGER_EVENT_EXCEPTIONS_ALL_FIRST_32_ENTRIES && EventDetails->OptionalParam1 >= 33)
+        {
+            //
+            // We don't support entries other than first 32 IDT indexes,
+            // it is because we use exception bitmaps and in order to support
+            // more than 32 indexes we should use pin-based external interrupt
+            // exiting which is completely different
+            //
+            ResultsToReturnUsermode->IsSuccessful = FALSE;
+            ResultsToReturnUsermode->Error        = DEBUGEER_ERROR_EXCEPTION_INDEX_EXCEED_FIRST_32_ENTRIES;
+            return FALSE;
+        }
+    }
+    else if (EventDetails->EventType == EXTERNAL_INTERRUPT_OCCURRED)
+    {
+        //
+        // Check if the exception entry is between 33 to 255
+        //
+        if (!(EventDetails->OptionalParam1 >= 33 && EventDetails->OptionalParam1 <= 0xff))
+        {
+            //
+            // The IDT Entry is either invalid or is not in the range
+            // of the pin-based external interrupt exiting controls
+            //
+            ResultsToReturnUsermode->IsSuccessful = FALSE;
+            ResultsToReturnUsermode->Error        = DEBUGEER_ERROR_INTERRUPT_INDEX_IS_NOT_VALID;
+            return FALSE;
+        }
+    }
+    else if (EventDetails->EventType == HIDDEN_HOOK_EXEC_DETOURS)
     {
         //
         // First check if the address are valid
         //
-        if (VirtualAddressToPhysicalAddress(EventDetails->OptionalParam1) == NULL)
+        TempPid = EventDetails->ProcessId;
+        if (TempPid == DEBUGGER_EVENT_APPLY_TO_ALL_PROCESSES)
+        {
+            TempPid = PsGetCurrentProcessId();
+        }
+        DbgBreakPoint();
+        if (VirtualAddressToPhysicalAddressByProcessId(EventDetails->OptionalParam1, TempPid) == NULL)
         {
             //
             // Address is invalid (Set the error)
@@ -1011,6 +1203,12 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
             return FALSE;
         }
     }
+
+    //
+    // ----------------------------------------------------------------------------------
+    // Create Event
+    // ----------------------------------------------------------------------------------
+    //
 
     //
     // We initialize event with disabled mode as it doesn't have action yet
@@ -1065,6 +1263,12 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
     DebuggerRegisterEvent(Event);
 
     //
+    // ----------------------------------------------------------------------------------
+    // Enable Event
+    // ----------------------------------------------------------------------------------
+    //
+
+    //
     // Now we should configure the cpu to generate the events
     //
     if (EventDetails->EventType == HIDDEN_HOOK_READ_AND_WRITE)
@@ -1074,7 +1278,7 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
 
         for (size_t i = 0; i <= PagesBytes / PAGE_SIZE; i++)
         {
-            DebuggerEventEnableMonitorReadAndWriteForAddress((UINT64)EventDetails->OptionalParam1 + (i * PAGE_SIZE), TRUE, TRUE);
+            DebuggerEventEnableMonitorReadAndWriteForAddress((UINT64)EventDetails->OptionalParam1 + (i * PAGE_SIZE), EventDetails->ProcessId, TRUE, TRUE);
         }
 
         //
@@ -1092,7 +1296,7 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
 
         for (size_t i = 0; i <= PagesBytes / PAGE_SIZE; i++)
         {
-            DebuggerEventEnableMonitorReadAndWriteForAddress((UINT64)EventDetails->OptionalParam1 + (i * PAGE_SIZE), TRUE, TRUE);
+            DebuggerEventEnableMonitorReadAndWriteForAddress((UINT64)EventDetails->OptionalParam1 + (i * PAGE_SIZE), EventDetails->ProcessId, TRUE, TRUE);
         }
 
         //
@@ -1113,7 +1317,7 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
 
         for (size_t i = 0; i <= PagesBytes / PAGE_SIZE; i++)
         {
-            DebuggerEventEnableMonitorReadAndWriteForAddress((UINT64)EventDetails->OptionalParam1 + (i * PAGE_SIZE), TRUE, TRUE);
+            DebuggerEventEnableMonitorReadAndWriteForAddress((UINT64)EventDetails->OptionalParam1 + (i * PAGE_SIZE), EventDetails->ProcessId, TRUE, TRUE);
         }
 
         //
@@ -1126,7 +1330,7 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
     }
     else if (EventDetails->EventType == HIDDEN_HOOK_EXEC_DETOURS)
     {
-        EptPageHook(EventDetails->OptionalParam1, AsmGeneralDetourHook, FALSE, FALSE, TRUE);
+        EptPageHook(EventDetails->OptionalParam1, AsmGeneralDetourHook, EventDetails->ProcessId, FALSE, FALSE, TRUE);
 
         //
         // We set events OptionalParam1 here to make sure that our event is
@@ -1134,17 +1338,210 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
         //
         Event->OptionalParam1 = VirtualAddressToPhysicalAddress(EventDetails->OptionalParam1);
     }
-    else if (EventDetails->EventType == HIDDEN_HOOK_EXEC_CC)
+    else if (EventDetails->EventType == RDMSR_INSTRUCTION_EXECUTION)
     {
-        DbgBreakPoint();
+        //
+        // Let's see if it is for all cores or just one core
+        //
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandChangeAllMsrBitmapReadAllCores(EventDetails->OptionalParam1);
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformChangeMsrBitmapReadOnSingleCore, EventDetails->OptionalParam1);
+        }
+
+        //
+        // Setting an indicator to MSR
+        //
+        Event->OptionalParam1 = EventDetails->OptionalParam1;
+    }
+    else if (EventDetails->EventType == WRMSR_INSTRUCTION_EXECUTION)
+    {
+        //
+        // Let's see if it is for all cores or just one core
+        //
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandChangeAllMsrBitmapWriteAllCores(EventDetails->OptionalParam1);
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformChangeMsrBitmapWriteOnSingleCore, EventDetails->OptionalParam1);
+        }
+
+        //
+        // Setting an indicator to MSR
+        //
+        Event->OptionalParam1 = EventDetails->OptionalParam1;
+    }
+    else if (EventDetails->EventType == IN_INSTRUCTION_EXECUTION || EventDetails->EventType == OUT_INSTRUCTION_EXECUTION)
+    {
+        //
+        // Let's see if it is for all cores or just one core
+        //
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandIoBitmapChangeAllCores(EventDetails->OptionalParam1);
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformChangeIoBitmapOnSingleCore, EventDetails->OptionalParam1);
+        }
+
+        //
+        // Setting an indicator to MSR
+        //
+        Event->OptionalParam1 = EventDetails->OptionalParam1;
+    }
+    else if (EventDetails->EventType == TSC_INSTRUCTION_EXECUTION)
+    {
+        //
+        // Let's see if it is for all cores or just one core
+        //
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandEnableRdtscExitingAllCores();
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformEnableRdtscExitingOnSingleCore, NULL);
+        }
+    }
+    else if (EventDetails->EventType == PMC_INSTRUCTION_EXECUTION)
+    {
+        //
+        // Let's see if it is for all cores or just one core
+        //
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandEnableRdpmcExitingAllCores();
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformEnableRdpmcExitingOnSingleCore, NULL);
+        }
+    }
+    else if (EventDetails->EventType == DEBUG_REGISTERS_ACCESSED)
+    {
+        //
+        // Let's see if it is for all cores or just one core
+        //
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandEnableMovDebugRegistersExiyingAllCores();
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformEnableMovToDebugRegistersExiting, NULL);
+        }
+    }
+    else if (EventDetails->EventType == EXCEPTION_OCCURRED)
+    {
+        //
+        // Let's see if it is for all cores or just one core
+        //
+
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandSetExceptionBitmapAllCores(EventDetails->OptionalParam1);
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformSetExceptionBitmapOnSingleCore, EventDetails->OptionalParam1);
+        }
+
+        //
+        // Set the event's target exception
+        //
+        Event->OptionalParam1 = EventDetails->OptionalParam1;
+    }
+    else if (EventDetails->EventType == EXTERNAL_INTERRUPT_OCCURRED)
+    {
+        //
+        // Let's see if it is for all cores or just one core
+        //
+
+        if (EventDetails->CoreId == DEBUGGER_EVENT_APPLY_TO_ALL_CORES)
+        {
+            //
+            // All cores
+            //
+            ExtensionCommandSetExternalInterruptExitingAllCores();
+        }
+        else
+        {
+            //
+            // Just one core
+            //
+            DpcRoutineRunTaskOnSingleCore(EventDetails->CoreId, DpcRoutinePerformSetExternalInterruptExitingOnSingleCore, NULL);
+        }
+
+        //
+        // Set the event's target interrupt
+        //
+        Event->OptionalParam1 = EventDetails->OptionalParam1;
     }
     else if (EventDetails->EventType == SYSCALL_HOOK_EFER_SYSCALL)
     {
         DebuggerEventEnableEferOnAllProcessors();
+
+        //
+        // Set the event's target syscall number
+        //
+        Event->OptionalParam1 = EventDetails->OptionalParam1;
     }
     else if (EventDetails->EventType == SYSCALL_HOOK_EFER_SYSRET)
     {
         DebuggerEventEnableEferOnAllProcessors();
+
+        //
+        // Set the event's target syscall number
+        //
+        Event->OptionalParam1 = EventDetails->OptionalParam1;
     }
     else
     {
@@ -1173,7 +1570,6 @@ DebuggerParseEventFromUsermode(PDEBUGGER_GENERAL_EVENT_DETAIL EventDetails, UINT
 BOOLEAN
 DebuggerParseActionFromUsermode(PDEBUGGER_GENERAL_ACTION Action, UINT32 BufferLength, PDEBUGGER_EVENT_AND_ACTION_REG_BUFFER ResultsToReturnUsermode)
 {
-    DbgBreakPoint();
     //
     // Check if Tag is valid or not
     //

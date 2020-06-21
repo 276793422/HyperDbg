@@ -1,10 +1,10 @@
 /**
- * @file syscall-sysret.cpp
+ * @file pmc.cpp
  * @author Sina Karvandi (sina@rayanfam.com)
- * @brief !cpuid commands
+ * @brief !pmc commands
  * @details
  * @version 0.1
- * @date 2020-05-30
+ * @date 2020-06-03
  *
  * @copyright This project is released under the GNU Public License v3.
  *
@@ -12,20 +12,19 @@
 
 #include "pch.h"
 
-VOID CommandCpuidHelp() {
-  ShowMessages("!cpuid : Monitors execution of a special cpuid index or all "
-               "cpuids instructions.\n\n");
-  ShowMessages("syntax : \t!cpuid core [core index "
+VOID CommandPmcHelp() {
+  ShowMessages("!pmc : Monitors execution of rdpmc instructions.\n\n");
+  ShowMessages("syntax : \t!tsc core [core index "
                "(hex value)] pid [process id (hex value)] condition {[assembly "
                "in hex]} code {[assembly in hex]} buffer [pre-require buffer - "
                "(hex value)] \n");
 
-  ShowMessages("\t\te.g : !cpuid\n");
-  ShowMessages("\t\te.g : !cpuid pid 400\n");
-  ShowMessages("\t\te.g : !cpuid core 2 pid 400\n");
+  ShowMessages("\t\te.g : !pmc\n");
+  ShowMessages("\t\te.g : !pmc pid 400\n");
+  ShowMessages("\t\te.g : !pmc core 2 pid 400\n");
 }
 
-VOID CommandCpuid(vector<string> SplittedCommand) {
+VOID CommandPmc(vector<string> SplittedCommand) {
 
   PDEBUGGER_GENERAL_EVENT_DETAIL Event;
   PDEBUGGER_GENERAL_ACTION Action;
@@ -37,9 +36,9 @@ VOID CommandCpuid(vector<string> SplittedCommand) {
   //
   //
   if (!InterpretGeneralEventAndActionsFields(
-          &SplittedCommand, CPUID_INSTRUCTION_EXECUTION, &Event, &EventLength,
+          &SplittedCommand, PMC_INSTRUCTION_EXECUTION, &Event, &EventLength,
           &Action, &ActionLength)) {
-    CommandCpuidHelp();
+    CommandPmcHelp();
     return;
   }
 

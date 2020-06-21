@@ -76,6 +76,11 @@ SyscallHookConfigureEFER(BOOLEAN EnableEFERSyscallHook)
         // Set the GUEST EFER to use this value as the EFER
         //
         __vmx_vmwrite(GUEST_EFER, MsrValue.Flags);
+
+        //
+        // also, we have to set exception bitmap to cause vm-exit on #UDs
+        //
+        HvSetExceptionBitmap(EXCEPTION_VECTOR_UNDEFINED_OPCODE);
     }
     else
     {
@@ -95,37 +100,12 @@ SyscallHookConfigureEFER(BOOLEAN EnableEFERSyscallHook)
         // Set the GUEST EFER to use this value as the EFER
         //
         __vmx_vmwrite(GUEST_EFER, MsrValue.Flags);
+
+        //
+        // unset the exception to not cause vm-exit on #UDs
+        //
+        HvUnsetExceptionBitmap(EXCEPTION_VECTOR_UNDEFINED_OPCODE);
     }
-}
-
-/**
- * @brief Set the Guest Cs selector
- * 
- * @param Cs The CS Selector for the guest
- * @return VOID 
- */
-VOID
-SetGuestCs(PSEGMENT_SELECTOR Cs)
-{
-    __vmx_vmwrite(GUEST_CS_BASE, Cs->BASE);
-    __vmx_vmwrite(GUEST_CS_LIMIT, Cs->LIMIT);
-    __vmx_vmwrite(GUEST_CS_AR_BYTES, Cs->ATTRIBUTES.UCHARs);
-    __vmx_vmwrite(GUEST_CS_SELECTOR, Cs->SEL);
-}
-
-/**
- * @brief Set the Guest Ss selector
- * 
- * @param Ss The SS Selector for the guest
- * @return VOID 
- */
-VOID
-SetGuestSs(PSEGMENT_SELECTOR Ss)
-{
-    __vmx_vmwrite(GUEST_SS_BASE, Ss->BASE);
-    __vmx_vmwrite(GUEST_SS_LIMIT, Ss->LIMIT);
-    __vmx_vmwrite(GUEST_SS_AR_BYTES, Ss->ATTRIBUTES.UCHARs);
-    __vmx_vmwrite(GUEST_SS_SELECTOR, Ss->SEL);
 }
 
 /**
@@ -326,7 +306,9 @@ EmulateSYSRET:
     //
     // Emulate SYSCALL instruction
     //
+
 EmulateSYSCALL:
+
     //
     // Test
     //
@@ -336,9 +318,10 @@ EmulateSYSCALL:
     //
 
     //
-    // We should trigger the event of SYSCALL here
+    // We should trigger the event of SYSCALL here, we send the
+    // syscall number in rax
     //
-    DebuggerTriggerEvents(SYSCALL_HOOK_EFER_SYSCALL, Regs, Rip);
+    DebuggerTriggerEvents(SYSCALL_HOOK_EFER_SYSCALL, Regs, Regs->rax);
 
     Result = SyscallHookEmulateSYSCALL(Regs);
 

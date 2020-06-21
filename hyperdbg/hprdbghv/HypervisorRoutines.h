@@ -37,11 +37,12 @@ HvGetSegmentDescriptor(PSEGMENT_SELECTOR SegmentSelector, USHORT Selector, PUCHA
 /* Set Msr Bitmap */
 BOOLEAN
 HvSetMsrBitmap(ULONG64 Msr, INT ProcessorID, BOOLEAN ReadDetection, BOOLEAN WriteDetection);
-
+/* UnSet Msr Bitmap */
+BOOLEAN
+HvUnSetMsrBitmap(ULONG64 Msr, INT ProcessorID, BOOLEAN ReadDetection, BOOLEAN WriteDetection);
 /* Returns the Cpu Based and Secondary Processor Based Controls and other controls based on hardware support */
 ULONG
 HvAdjustControls(ULONG Ctl, ULONG Msr);
-
 /* Notify all cores about EPT Invalidation */
 VOID
 HvNotifyAllToInvalidateEpt();
@@ -81,7 +82,6 @@ HvSetMonitorTrapFlag(BOOLEAN Set);
 /* Set the vm-exit on cr3 for finding a process */
 VOID
 HvSetExitOnCr3Change(BOOLEAN Set);
-
 /* Returns the stack pointer, to change in the case of Vmxoff */
 UINT64
 HvReturnStackPointerForVmxoff();
@@ -91,10 +91,48 @@ HvReturnInstructionPointerForVmxoff();
 /* Reset GDTR/IDTR and other old when you do vmxoff as the patchguard will detect them left modified */
 VOID
 HvRestoreRegisters();
-
 /* Remove single hook from the hooked pages list and invalidate TLB */
 BOOLEAN
 HvPerformPageUnHookSinglePage(UINT64 VirtualAddress);
 /* Remove all hooks from the hooked pages list and invalidate TLB */
 VOID
 HvPerformPageUnHookAllPages();
+/* Change MSR Bitmap for read */
+VOID
+HvPerformMsrBitmapReadChange(UINT64 MsrMask);
+/* Change MSR Bitmap for write */
+VOID
+HvPerformMsrBitmapWriteChange(UINT64 MsrMask);
+/* Set vm-exit for tsc instructions (rdtsc/rdtscp) */
+VOID
+HvSetTscVmexit(BOOLEAN Set);
+/* Set vm-exit for rdpmc instructions */
+VOID
+HvSetPmcVmexit(BOOLEAN Set);
+/* Set exception bitmap in VMCS */
+VOID
+HvSetExceptionBitmap(UINT32 IdtIndex);
+/* Unset exception bitmap in VMCS */
+VOID
+HvUnsetExceptionBitmap(UINT32 IdtIndex);
+/* Set Interrupt-window exiting */
+VOID
+HvSetInterruptWindowExiting(BOOLEAN Set);
+/* Set the nmi-Window exiting */
+VOID
+HvSetNmiWindowExiting(BOOLEAN Set);
+/* Handle Mov to Debug Registers Exitings */
+VOID
+HvHandleMovDebugRegister(UINT32 ProcessorIndex, PGUEST_REGS Regs);
+/* Set the Mov to Debug Registers Exiting */
+VOID
+HvSetMovDebugRegsExiting(BOOLEAN Set);
+/* Set the External Interrupt Exiting */
+VOID
+HvSetExternalInterruptExiting(BOOLEAN Set);
+/* Set bits in I/O Bitmap */
+BOOLEAN
+HvSetIoBitmap(UINT64 Port, UINT32 ProcessorID);
+/* Change I/O Bitmap */
+VOID
+HvPerformIoBitmapChange(UINT64 Port);

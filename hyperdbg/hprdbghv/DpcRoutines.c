@@ -12,6 +12,8 @@
  */
 #include "Common.h";
 #include "GlobalVariables.h";
+#include "Vmcall.h";
+#include "InlineAsm.h";
 
 /* lock for one core execution */
 volatile LONG OneCoreLock;
@@ -149,6 +151,166 @@ DpcRoutinePerformReadMsr(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument
     // read on MSR
     //
     g_GuestState[CurrentProcessorIndex].DebuggingState.MsrState.Value = __readmsr(g_GuestState[CurrentProcessorIndex].DebuggingState.MsrState.Msr);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief change msr bitmap read on a single core
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformChangeMsrBitmapReadOnSingleCore(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // change msr bitmap (read)
+    //
+    AsmVmxVmcall(VMCALL_CHANGE_MSR_BITMAP_READ, DeferredContext, 0, 0);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief change msr bitmap write on a single core
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformChangeMsrBitmapWriteOnSingleCore(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // change msr bitmap (write)
+    //
+    AsmVmxVmcall(VMCALL_CHANGE_MSR_BITMAP_WRITE, DeferredContext, 0, 0);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief set rdtsc/rdtscp exiting
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformEnableRdtscExitingOnSingleCore(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // enable rdtsc/rdtscp exiting
+    //
+    AsmVmxVmcall(VMCALL_SET_RDTSC_EXITING, 0, 0, 0);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief set rdpmc exiting
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformEnableRdpmcExitingOnSingleCore(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // enable rdtsc/rdtscp exiting
+    //
+    AsmVmxVmcall(VMCALL_SET_RDPMC_EXITING, 0, 0, 0);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief change exception bitmap on a single core
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformSetExceptionBitmapOnSingleCore(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // change msr exception bitmap
+    //
+    AsmVmxVmcall(VMCALL_SET_EXCEPTION_BITMAP, DeferredContext, 0, 0);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief Set the Mov to Debug Registers Exitings
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformEnableMovToDebugRegistersExiting(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // enable Mov to Debug Registers Exitings
+    //
+    AsmVmxVmcall(VMCALL_ENABLE_MOV_TO_DEBUG_REGS_EXITING, 0, 0, 0);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief Enable external interrupt exiting on a single core
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformSetExternalInterruptExitingOnSingleCore(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // Enable external interrupt exiting
+    //
+    AsmVmxVmcall(VMCALL_ENABLE_EXTERNAL_INTERRUPT_EXITING, NULL, 0, 0);
+
+    //
+    // As this function is designed for a single,
+    // we have to release the synchronization lock here
+    //
+    SpinlockUnlock(&OneCoreLock);
+}
+
+/**
+ * @brief change I/O bitmap on a single core
+ * 
+ * @return VOID 
+ */
+VOID
+DpcRoutinePerformChangeIoBitmapOnSingleCore(KDPC * Dpc, PVOID DeferredContext, PVOID SystemArgument1, PVOID SystemArgument2)
+{
+    //
+    // change I/O bitmap
+    //
+    AsmVmxVmcall(VMCALL_CHANGE_IO_BITMAP, DeferredContext, 0, 0);
 
     //
     // As this function is designed for a single,

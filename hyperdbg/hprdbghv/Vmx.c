@@ -156,15 +156,6 @@ VmxVirtualizeCurrentSystem(PVOID GuestStack)
     LogInfo("Executing VMLAUNCH on logical core %d", ProcessorID);
 
     //
-    // Test, should be removed
-    //
-
-    HvSetMsrBitmap(0xc0000082, 0, TRUE, TRUE);
-    HvSetMsrBitmap(0xc0000082, 1, TRUE, TRUE);
-    HvSetMsrBitmap(0xc0000082, 2, TRUE, TRUE);
-    HvSetMsrBitmap(0xc0000082, 3, TRUE, TRUE);
-
-    //
     // Setting the state to indicate current core is currently virtualized
     //
 
@@ -226,6 +217,8 @@ VmxTerminate()
         MmFreeContiguousMemory(g_GuestState[CurrentCoreIndex].VmcsRegionVirtualAddress);
         ExFreePoolWithTag(g_GuestState[CurrentCoreIndex].VmmStack, POOLTAG);
         ExFreePoolWithTag(g_GuestState[CurrentCoreIndex].MsrBitmapVirtualAddress, POOLTAG);
+        ExFreePoolWithTag(g_GuestState[CurrentCoreIndex].IoBitmapVirtualAddressA, POOLTAG);
+        ExFreePoolWithTag(g_GuestState[CurrentCoreIndex].IoBitmapVirtualAddressB, POOLTAG);
 
         return TRUE;
     }
@@ -367,7 +360,7 @@ VmxSetupVmcs(VIRTUAL_MACHINE_STATE * CurrentGuestState, PVOID GuestStack)
     __vmx_vmwrite(GUEST_FS_BASE, __readmsr(MSR_FS_BASE));
     __vmx_vmwrite(GUEST_GS_BASE, __readmsr(MSR_GS_BASE));
 
-    CpuBasedVmExecControls = HvAdjustControls(CPU_BASED_ACTIVATE_MSR_BITMAP | CPU_BASED_ACTIVATE_SECONDARY_CONTROLS,
+    CpuBasedVmExecControls = HvAdjustControls(CPU_BASED_ACTIVATE_IO_BITMAP | CPU_BASED_ACTIVATE_MSR_BITMAP | CPU_BASED_ACTIVATE_SECONDARY_CONTROLS,
                                               VmxBasicMsr.Fields.VmxCapabilityHint ? MSR_IA32_VMX_TRUE_PROCBASED_CTLS : MSR_IA32_VMX_PROCBASED_CTLS);
 
     __vmx_vmwrite(CPU_BASED_VM_EXEC_CONTROL, CpuBasedVmExecControls);
@@ -442,12 +435,10 @@ VmxSetupVmcs(VIRTUAL_MACHINE_STATE * CurrentGuestState, PVOID GuestStack)
     __vmx_vmwrite(MSR_BITMAP, CurrentGuestState->MsrBitmapPhysicalAddress);
 
     //
-    // Set exception bitmap to hook division by zero (bit 1 of EXCEPTION_BITMAP)
-    // __vmx_vmwrite(EXCEPTION_BITMAP, 0x8); // breakpoint 3nd bit
+    // Set I/O Bitmaps
     //
-    //__vmx_vmwrite(EXCEPTION_BITMAP, 0x40); // #UDs 3nd bit
-    //__vmx_vmwrite(EXCEPTION_BITMAP, 0xffffffff & ~(1 << 14)); // Anything execpt #PF
-    //__vmx_vmwrite(EXCEPTION_BITMAP, 0xffffffff); // Anything
+    __vmx_vmwrite(IO_BITMAP_A, CurrentGuestState->IoBitmapPhysicalAddressA);
+    __vmx_vmwrite(IO_BITMAP_B, CurrentGuestState->IoBitmapPhysicalAddressB);
 
     //
     // Set up EPT

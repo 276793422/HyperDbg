@@ -113,13 +113,7 @@
     <ClCompile Include="Events.c">
       <Filter>Source Files\VMX</Filter>
     </ClCompile>
-    <ClCompile Include="Exit.c">
-      <Filter>Source Files\VMX</Filter>
-    </ClCompile>
     <ClCompile Include="SsdtHook.c">
-      <Filter>Source Files\Debugger\Features\Hooks\SyscallHook</Filter>
-    </ClCompile>
-    <ClCompile Include="EFERHook.c">
       <Filter>Source Files\Debugger\Features\Hooks\SyscallHook</Filter>
     </ClCompile>
     <ClCompile Include="HiddenHooks.c">
@@ -151,6 +145,30 @@
     </ClCompile>
     <ClCompile Include="DebuggerEvents.c">
       <Filter>Source Files\Debugger\Essentials</Filter>
+    </ClCompile>
+    <ClCompile Include="Ioctl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="IoHandler.c">
+      <Filter>Source Files\VMX</Filter>
+    </ClCompile>
+    <ClCompile Include="IdtEmulation.c">
+      <Filter>Source Files\VMX</Filter>
+    </ClCompile>
+    <ClCompile Include="EferHook.c">
+      <Filter>Source Files\Debugger\Features\Hooks\SyscallHook</Filter>
+    </ClCompile>
+    <ClCompile Include="SegmentRegs.c">
+      <Filter>Source Files\VMX</Filter>
+    </ClCompile>
+    <ClCompile Include="Counters.c">
+      <Filter>Source Files\VMX</Filter>
+    </ClCompile>
+    <ClCompile Include="CrossVmexits.c">
+      <Filter>Source Files\VMX</Filter>
+    </ClCompile>
+    <ClCompile Include="Vmexit.c">
+      <Filter>Source Files\VMX</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -228,6 +246,15 @@
     </ClInclude>
     <ClInclude Include="DebuggerEvents.h">
       <Filter>Header Files\Debugger\Essentials</Filter>
+    </ClInclude>
+    <ClInclude Include="IoHandler.h">
+      <Filter>Header Files\Hypervisor</Filter>
+    </ClInclude>
+    <ClInclude Include="IdtEmulation.h">
+      <Filter>Header Files\Hypervisor</Filter>
+    </ClInclude>
+    <ClInclude Include="Counters.h">
+      <Filter>Header Files\Hypervisor</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

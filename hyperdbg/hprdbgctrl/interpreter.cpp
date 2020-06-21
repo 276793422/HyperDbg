@@ -78,6 +78,24 @@ int _cdecl HyperdbgInterpreter(const char *Command) {
     CommandHiddenHook(SplittedCommand);
   } else if (!FirstCommand.compare("!cpuid")) {
     CommandCpuid(SplittedCommand);
+  } else if (!FirstCommand.compare("!msrread")) {
+    CommandMsrread(SplittedCommand);
+  } else if (!FirstCommand.compare("!msrwrite")) {
+    CommandMsrwrite(SplittedCommand);
+  } else if (!FirstCommand.compare("!tsc")) {
+    CommandTsc(SplittedCommand);
+  } else if (!FirstCommand.compare("!pmc")) {
+    CommandPmc(SplittedCommand);
+  } else if (!FirstCommand.compare("!dr")) {
+    CommandDr(SplittedCommand);
+  } else if (!FirstCommand.compare("!ioin")) {
+    CommandIoin(SplittedCommand);
+  } else if (!FirstCommand.compare("!ioout")) {
+    CommandIoout(SplittedCommand);
+  } else if (!FirstCommand.compare("!exception")) {
+    CommandException(SplittedCommand);
+  } else if (!FirstCommand.compare("!interrupt")) {
+    CommandInterrupt(SplittedCommand);
   } else if (!FirstCommand.compare("!syscall") ||
              !FirstCommand.compare("!sysret")) {
     CommandSyscallAndSysret(SplittedCommand);

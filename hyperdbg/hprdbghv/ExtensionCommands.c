@@ -21,7 +21,7 @@
 /**
  * @brief routines for !pte command
  * 
- * @return VOID 
+ * @return BOOLEAN 
  */
 BOOLEAN
 ExtensionCommandPte(PDEBUGGER_READ_PAGE_TABLE_ENTRIES_DETAILS PteDetails)
@@ -78,4 +78,116 @@ ExtensionCommandPte(PDEBUGGER_READ_PAGE_TABLE_ENTRIES_DETAILS PteDetails)
     }
 
     return TRUE;
+}
+
+/**
+ * @brief routines for !msrread command which 
+ * @details causes vm-exit on all msr reads 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandChangeAllMsrBitmapReadAllCores(UINT64 BitmapMask)
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcChangeMsrBitmapReadOnAllCores, BitmapMask);
+}
+
+/**
+ * @brief routines for !msrwrite command which 
+ * @details causes vm-exit on all msr writes 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandChangeAllMsrBitmapWriteAllCores(UINT64 BitmapMask)
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcChangeMsrBitmapWriteOnAllCores, BitmapMask);
+}
+
+/**
+ * @brief routines for !tsc 
+ * @details causes vm-exit on all execution of rdtsc/rdtscp 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandEnableRdtscExitingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcEnableRdtscExitingAllCores, NULL);
+}
+
+/**
+ * @brief routines for !pmc 
+ * @details causes vm-exit on all execution of rdpmc 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandEnableRdpmcExitingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcEnableRdpmcExitingAllCores, NULL);
+}
+
+/**
+ * @brief routines for !exception command which 
+ * @details causes vm-exit when exception occurred 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandSetExceptionBitmapAllCores(UINT64 ExceptionIndex)
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcSetExceptionBitmapOnAllCores, ExceptionIndex);
+}
+
+/**
+ * @brief routines for !dr 
+ * @details causes vm-exit on all accesses to debug registers 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandEnableMovDebugRegistersExiyingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcEnableMovDebigRegisterExitingAllCores, NULL);
+}
+
+/**
+ * @brief routines for !interrupt command which 
+ * @details causes vm-exit when external interrupt occurs 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandSetExternalInterruptExitingAllCores()
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcSetEnableExternalInterruptExitingOnAllCores, NULL);
+}
+
+/**
+ * @brief routines for !ioin and !ioout command which 
+ * @details causes vm-exit on all i/o instructions or one port 
+ * @return VOID 
+ */
+VOID
+ExtensionCommandIoBitmapChangeAllCores(UINT64 Port)
+{
+    //
+    // Broadcast to all cores
+    //
+    KeGenericCallDpc(BroadcastDpcChangeIoBitmapOnAllCores, Port);
 }

@@ -13,6 +13,7 @@
 #pragma once
 #include "Ept.h"
 #include "Configuration.h"
+#include "MemoryMapper.h"
 #include "Trace.h"
 
 //////////////////////////////////////////////////
@@ -142,6 +143,8 @@ SpinlockUnlock(volatile LONG * Lock);
 #define BITMAP_ENTRY(_nr, _bmap) ((_bmap))[(_nr) / BITS_PER_LONG]
 #define BITMAP_SHIFT(_nr)        ((_nr) % BITS_PER_LONG)
 
+#define PAGE_OFFSET(Va) ((PVOID)((ULONG_PTR)(Va) & (PAGE_SIZE - 1)))
+
 //////////////////////////////////////////////////
 //					 Structures					//
 //////////////////////////////////////////////////
@@ -154,32 +157,30 @@ typedef union _RFLAGS
 {
     struct
     {
-        unsigned Reserved1 : 10;
-        unsigned ID : 1;  // Identification flag
-        unsigned VIP : 1; // Virtual interrupt pending
-        unsigned VIF : 1; // Virtual interrupt flag
-        unsigned AC : 1;  // Alignment check
-        unsigned VM : 1;  // Virtual 8086 mode
-        unsigned RF : 1;  // Resume flag
-        unsigned Reserved2 : 1;
-        unsigned NT : 1;   // Nested task flag
-        unsigned IOPL : 2; // I/O privilege level
-        unsigned OF : 1;
-        unsigned DF : 1;
-        unsigned IF : 1; // Interrupt flag
-        unsigned TF : 1; // Task flag
-        unsigned SF : 1; // Sign flag
-        unsigned ZF : 1; // Zero flag
-        unsigned Reserved3 : 1;
-        unsigned AF : 1; // Borrow flag
-        unsigned Reserved4 : 1;
-        unsigned PF : 1; // Parity flag
-        unsigned Reserved5 : 1;
-        unsigned CF : 1; // Carry flag [Bit 0]
-        unsigned Reserved6 : 32;
+        UINT64 CarryFlag : 1;
+        UINT64 ReadAs1 : 1;
+        UINT64 ParityFlag : 1;
+        UINT64 Reserved1 : 1;
+        UINT64 AuxiliaryCarryFlag : 1;
+        UINT64 Reserved2 : 1;
+        UINT64 ZeroFlag : 1;
+        UINT64 SignFlag : 1;
+        UINT64 TrapFlag : 1;
+        UINT64 InterruptEnableFlag : 1;
+        UINT64 DirectionFlag : 1;
+        UINT64 OverflowFlag : 1;
+        UINT64 IoPrivilegeLevel : 2;
+        UINT64 NestedTaskFlag : 1;
+        UINT64 Reserved3 : 1;
+        UINT64 ResumeFlag : 1;
+        UINT64 Virtual8086ModeFlag : 1;
+        UINT64 AlignmentCheckFlag : 1;
+        UINT64 VirtualInterruptFlag : 1;
+        UINT64 VirtualInterruptPendingFlag : 1;
+        UINT64 IdentificationFlag : 1;
     };
 
-    ULONG64 Content;
+    UINT64 Value;
 } RFLAGS, *PRFLAGS;
 
 /**
@@ -271,6 +272,90 @@ typedef union _PAGE_FAULT_ERROR_CODE
         ULONG32 Fetch : 1;    //
     } Fields;
 } PAGE_FAULT_ERROR_CODE, *PPAGE_FAULT_ERROR_CODE;
+
+typedef struct _CONTROL_REGISTER_4
+{
+    union
+    {
+        UINT64 Flags;
+
+        struct
+        {
+            UINT64 VirtualModeExtensions : 1;
+            UINT64 ProtectedModeVirtualInterrupts : 1;
+            UINT64 TimestampDisable : 1;
+            UINT64 DebuggingExtensions : 1;
+            UINT64 PageSizeExtensions : 1;
+            UINT64 PhysicalAddressExtension : 1;
+            UINT64 MachineCheckEnable : 1;
+            UINT64 PageGlobalEnable : 1;
+            UINT64 PerformanceMonitoringCounterEnable : 1;
+            UINT64 OsFxsaveFxrstorSupport : 1;
+            UINT64 OsXmmExceptionSupport : 1;
+            UINT64 UsermodeInstructionPrevention : 1;
+            UINT64 Reserved1 : 1;
+            UINT64 VmxEnable : 1;
+            UINT64 SmxEnable : 1;
+            UINT64 Reserved2 : 1;
+            UINT64 FsGsBaseEnable : 1;
+            UINT64 PcidEnable : 1;
+            UINT64 OsXsave : 1;
+            UINT64 Reserved3 : 1;
+            UINT64 SmepEnable : 1;
+            UINT64 SmapEnable : 1;
+            UINT64 ProtectionKeyEnable : 1;
+        };
+    };
+} CONTROL_REGISTER_4, *PCONTROL_REGISTER_4;
+
+typedef union _DEBUG_REGISTER_7
+{
+    UINT64 Flags;
+
+    struct
+    {
+        UINT64 LocalBreakpoint0 : 1;
+        UINT64 GlobalBreakpoint0 : 1;
+        UINT64 LocalBreakpoint1 : 1;
+        UINT64 GlobalBreakpoint1 : 1;
+        UINT64 LocalBreakpoint2 : 1;
+        UINT64 GlobalBreakpoint2 : 1;
+        UINT64 LocalBreakpoint3 : 1;
+        UINT64 GlobalBreakpoint3 : 1;
+        UINT64 LocalExactBreakpoint : 1;
+        UINT64 GlobalExactBreakpoint : 1;
+        UINT64 Reserved1 : 1; // always 1
+        UINT64 RestrictedTransactionalMemory : 1;
+        UINT64 Reserved2 : 1; // always 0
+        UINT64 GeneralDetect : 1;
+        UINT64 Reserved3 : 2; // always 0
+        UINT64 ReadWrite0 : 2;
+        UINT64 Length0 : 2;
+        UINT64 ReadWrite1 : 2;
+        UINT64 Length1 : 2;
+        UINT64 ReadWrite2 : 2;
+        UINT64 Length2 : 2;
+        UINT64 ReadWrite3 : 2;
+        UINT64 Length3 : 2;
+    };
+} DEBUG_REGISTER_7, *PDEBUG_REGISTER_7;
+
+typedef union DEBUG_REGISTER_6
+{
+    UINT64 Flags;
+
+    struct
+    {
+        UINT64 BreakpointCondition : 4;
+        UINT64 Reserved1 : 8; // always 1
+        UINT64 Reserved2 : 1; // always 0
+        UINT64 DebugRegisterAccessDetected : 1;
+        UINT64 SingleInstruction : 1;
+        UINT64 TaskSwitch : 1;
+        UINT64 RestrictedTransactionalMemory : 1;
+        UINT64 Reserved3 : 15; // always 1
+    };
+} DEBUG_REGISTER_6, *PDEBUG_REGISTER_6;
 
 //////////////////////////////////////////////////
 //				 Function Types					//
@@ -387,16 +472,25 @@ BOOLEAN
 BroadcastToProcessors(ULONG ProcessorNumber, RunOnLogicalCoreFunc Routine);
 
 UINT64
+PhysicalAddressToVirtualAddress(UINT64 PhysicalAddress);
+
+UINT64
 VirtualAddressToPhysicalAddress(PVOID VirtualAddress);
 
 UINT64
-PhysicalAddressToVirtualAddress(UINT64 PhysicalAddress);
+VirtualAddressToPhysicalAddressByProcessId(PVOID VirtualAddress, UINT32 ProcessId);
 
 int
 MathPower(int Base, int Exp);
 
 UINT64
 FindSystemDirectoryTableBase();
+
+CR3_TYPE
+SwitchOnAnotherProcessMemoryLayout(UINT32 ProcessId);
+
+VOID
+RestoreToPreviousProcess(CR3_TYPE PreviousProcess);
 
 //////////////////////////////////////////////////
 //			 WDK Major Functions				//

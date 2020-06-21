@@ -2,11 +2,15 @@
 [![Docs](https://raw.githubusercontent.com/HyperDbg/graphics/master/Badges/Link-Docs-yellow.svg)](https://docs.hyperdbg.com)
 [![Doxygen](https://raw.githubusercontent.com/HyperDbg/graphics/master/Badges/Link-Doxygen-lightgreen.svg)](https://doxygen.hyperdbg.com)
 [![License: GPL v3](https://raw.githubusercontent.com/HyperDbg/graphics/master/Badges/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Twitter: HyperDbg](https://raw.githubusercontent.com/HyperDbg/graphics/master/Badges/Link-HyperDbg-Twitter-skyblue.svg)](https://twitter.com/HyperDbg)
 
-<a href="https://hyperdbg.com/"><img align="right" width="150" height="150" src="https://raw.githubusercontent.com/HyperDbg/graphics/master/Icons/hyperdbg-icon.png" alt="HyperDbg Debugger"></a></br>
+<a href="https://hyperdbg.com/"><img align="right" width="150" height="150" src="https://raw.githubusercontent.com/HyperDbg/graphics/master/Art%20Board/HyperDbg-Cat.Circle.jpg" alt="HyperDbg Debugger"></a></br>
 
-# HyperDbg Debugger 
-#### (is not yet released/finished)
+# HyperDbg Debugger (is NOT in a WORKING STATE - YOU SHOULD NOT USE IT, but you can read codes, please wait for first release in late October)
+#### (is not yet released/finished) - We planned for first-release in late October 2020
+
+Follow HyperDbg on Twitter to get notified about new releases ! 
+<p align="center">(https://twitter.com/HyperDbg)</p>
 
 ## Description
 
@@ -27,7 +31,7 @@ Although it has novel features, HyperDbg tries to be as stealth as possible. It 
 ## How does it work?
 
 We explained about how HyperDbg internally works and how we designed its features in details, take a look at : </br>
-<p align="center">(https://docs.hyperdbg.com/how-does-it-work)</p>
+<p align="center">(https://docs.hyperdbg.com/design)</p>
 
 Here's a diagram that shows how HyperDbg works !
 </br>
@@ -38,8 +42,11 @@ Here's a diagram that shows how HyperDbg works !
 
 
 ## Plugins
+The plugin framework is not ready for the current version of HyperDbg. Future versions will support plugins.
 
-
+## Donations to charity
+We spent thousands of hours on HyperDbg and it's free and open-source for you, If you want to help to develop HyperDbg, please donate to children in Africa and send a picture of your donation to us, this makes all HyperDbg developers, super happy! Don't hesitate to send us the pictures, this way we know that we're doing something useful.
+<p align="center">(https://www.compassion.com/donate/donate-to-children-in-africa.htm)</p>
 
 ## Credits
  Developers :<br />
@@ -55,7 +62,7 @@ Here's a diagram that shows how HyperDbg works !
 ## Contributing
 Contributing in HyperDbg is super appreciated.
 
-If you want to create a pull request or contribute in HyperDbg please read [Contribution Guide](https://github.com/SinaKarvandi/HyperDbg/blob/master/CONTRIBUTING.md).
+If you want to create a pull request or contribute in HyperDbg please read [Contribution Guide](https://github.com/HyperDbg/HyperDbg/blob/master/CONTRIBUTING.md).
 
 
 ## License

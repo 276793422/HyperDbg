@@ -16,11 +16,22 @@
 //				     Functions		      		//
 //////////////////////////////////////////////////
 
-VOID
-ExtensionCommandEnableEferOnAllProcessors();
-
-VOID
-ExtensionCommandDisableEferOnAllProcessors();
-
 BOOLEAN
 ExtensionCommandPte(PDEBUGGER_READ_PAGE_TABLE_ENTRIES_DETAILS PteDetails);
+
+VOID
+ExtensionCommandChangeAllMsrBitmapReadAllCores(UINT64 BitmapMask);
+VOID
+ExtensionCommandChangeAllMsrBitmapWriteAllCores(UINT64 BitmapMask);
+VOID
+ExtensionCommandEnableRdtscExitingAllCores();
+VOID
+ExtensionCommandEnableRdpmcExitingAllCores();
+VOID
+ExtensionCommandSetExceptionBitmapAllCores(UINT64 ExceptionIndex);
+VOID
+ExtensionCommandEnableMovDebugRegistersExiyingAllCores();
+VOID
+ExtensionCommandSetExternalInterruptExitingAllCores();
+VOID
+ExtensionCommandIoBitmapChangeAllCores(UINT64 Port);
